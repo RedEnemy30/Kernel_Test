@@ -24,7 +24,7 @@
 	#size-cells = <2>;
 
 	chosen {
-		bootargs = "log_buf_len=256K rcupdate.rcu_expedited=1 rcu_nocbs=0-7 kpti=off noirqdebug";
+		bootargs = "log_buf_len=256K rcupdate.rcu_expedited=1 rcu_nocbs=0-7 kpti=off";
 	};
 
 	memory {
@@ -321,32 +321,32 @@
 
 	pil_adsp_mem: adsp@86700000 {
 		no-map;
-		reg = <0x0 0x86700000 0x0 0x2000000>;
+		reg = <0x0 0x86700000 0x0 0x2c00000>;
 	};
 
-	pil_cdsp_mem: cdsp@88700000 {
+	pil_cdsp_mem: cdsp@89300000 {
 		no-map;
-		reg = <0x0 0x88700000 0x0 0x1e00000>;
+		reg = <0x0 0x89300000 0x0 0x1e00000>;
 	};
 
-	pil_video_mem: video@8a500000 {
+	pil_video_mem: video@8b100000 {
 		no-map;
-		reg = <0x0 0x8a500000 0x0 0x500000>;
+		reg = <0x0 0x8b100000 0x0 0x500000>;
 	};
 
-	pil_ipa_fw_mem: ipa_fw@8aa00000 {
+	pil_ipa_fw_mem: ipa_fw@8b600000 {
 		no-map;
-		reg = <0x0 0x8aa00000 0x0 0x10000>;
+		reg = <0x0 0x8b600000 0x0 0x10000>;
 	};
 
-	pil_ipa_gsi_mem: ipa_gsi@8aa10000 {
+	pil_ipa_gsi_mem: ipa_gsi@8b610000 {
 		no-map;
-		reg = <0x0 0x8aa10000 0x0 0xa000>;
+		reg = <0x0 0x8b610000 0x0 0xa000>;
 	};
 
-	pil_gpu_micro_code_mem: gpu_micro_code@8aa1a000 {
+	pil_gpu_micro_code_mem: gpu_micro_code@8b61a000 {
 		no-map;
-		reg = <0x0 0x8aa1a000 0x0 0x2000>;
+		reg = <0x0 0x8b61a000 0x0 0x2000>;
 	};
 
 	pil_mpss_wlan_mem: mpss_wlan@8b800000 {
@@ -387,8 +387,9 @@
 	qcom: ramoops {
 		compatible = "ramoops";
 		reg = <0x0 0xd0000000 0x0 0x200000>;
-		pmsg-size = <0x200000>;
-		mem-type = <2>;
+		record-size = <0x100000>;
+		pmsg-size = <0x100000>;
+		max-reason = <4>;
 	};
 
 	/* global autoconfigured region for contiguous allocations */
@@ -402,9 +403,9 @@
 	};
 
 	adsp_mem: adsp_region {
-		compatible = "shared-dma-pool";
+		compatible = "removed-dma-pool";
 		alloc-ranges = <0 0x00000000 0 0xffffffff>;
-		reusable;
+		no-map;
 		alignment = <0 0x400000>;
 		size = <0 0x800000>;
 	};
@@ -1303,20 +1304,7 @@
 		interrupt-names = "dcvsh0_int", "dcvsh1_int";
 		#freq-domain-cells = <2>;
 
-		qcom,cpufreq-table-0 =
-			<576000>,
-			<691200>,
-			<940800>,
-			<1113600>,
-			<1324800>,
-			<1516800>,
-			<1651200>,
-			<1708800>,
-			<1804800>;
-
 		qcom,cpufreq-table-1 =
-			<691200>,
-			<940800>,
 			<1228800>,
 			<1401600>,
 			<1516800>,
@@ -2467,7 +2455,7 @@
 
 	qcom,rmtfs_sharedmem@0 {
 		compatible = "qcom,sharedmem-uio";
-		reg = <0x0 0x280000>;
+		reg = <0x0 0x300000>;
 		reg-names = "rmtfs";
 		qcom,client-id = <0x00000001>;
 		qcom,vm-nav-path;
@@ -2616,7 +2604,7 @@
 		phy-names = "ufsphy";
 		#reset-cells = <1>;
 		limit-phy-submode = <0>;
-		spm-level = <5>;
+		spm-level = <3>;
 		rpm-level = <3>;
 
 		lanes-per-direction = <1>;
@@ -3357,7 +3345,7 @@
 #include "holi-vidc.dtsi"
 #include "camera/blair-camera.dtsi"
 #include "holi-thermal.dtsi"
-#include "holi-qupv3.dtsi"
+#include "blair-qupv3.dtsi"
 #include "display/blair-sde.dtsi"
 #include "holi-audio.dtsi"
 #include "blair-usb.dtsi"
