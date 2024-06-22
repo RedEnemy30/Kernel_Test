@@ -1775,7 +1775,7 @@ static int lpm_probe(struct platform_device *pdev)
 		int cpu;
 		int freq;
 	} eff_table[] = {
-		0, 1708800,
+		0, 940800,
 		6, 1228800,
 	};
 #endif
