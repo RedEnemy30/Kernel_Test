@@ -53,7 +53,7 @@ jobs:
        make $KERNEL_CMDLINE CC="ccache clang" -j$(nproc --all)
        make $KERNEL_CMDLINE $KERNEL_DEFCONFIG dtbs
        cp out/arch/arm64/boot/Image AnyKernel3
-       cp out/arch/arm64/boot/dts/vendor/qcom/veux.dtb AnyKernel3/dtb
+       cp out/arch/arm64/boot/dts/vendor/xiaomi/veux.dtb AnyKernel3/dtb
 
     - name: Upload Kernel
       uses: actions/upload-artifact@v3
