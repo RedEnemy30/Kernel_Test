@@ -20,8 +20,6 @@
 #include <linux/slab.h>
 #include <linux/suspend.h>
 #include <linux/msm_rtb.h>
-#include <linux/wakeup_reason.h>
-
 
 #include <linux/irqchip.h>
 #include <linux/irqchip/arm-gic-common.h>
@@ -724,9 +722,6 @@ static asmlinkage void __exception_irq_entry gic_handle_irq(struct pt_regs *regs
 		err = handle_domain_irq(gic_data.domain, irqnr, regs);
 		if (err) {
 			WARN_ONCE(true, "Unexpected interrupt received!\n");
-			log_abnormal_wakeup_reason(
-					"unexpected HW IRQ %u", irqnr);
-
 			gic_deactivate_unhandled(irqnr);
 		}
 		return;
@@ -1164,7 +1159,6 @@ static void gic_send_sgi(u64 cluster_id, u16 tlist, unsigned int irq)
 	       MPIDR_TO_SGI_RS(cluster_id)		|
 	       tlist << ICC_SGI1R_TARGET_LIST_SHIFT);
 
-	pr_devel("CPU%d: ICC_SGI1R_EL1 %llx\n", smp_processor_id(), val);
 	gic_write_sgi1r(val);
 }
 

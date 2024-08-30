@@ -29,6 +29,9 @@ struct cpuidle_driver;
  * CPUIDLE DEVICE INTERFACE *
  ****************************/
 
+#define CPUIDLE_STATE_DISABLED_BY_USER		BIT(0)
+#define CPUIDLE_STATE_DISABLED_BY_DRIVER	BIT(1)
+
 struct cpuidle_state_usage {
 	unsigned long long	disable;
 	unsigned long long	usage;
@@ -227,7 +230,7 @@ static inline void cpuidle_use_deepest_state(bool enable)
 #endif
 
 /* kernel/sched/idle.c */
-extern void sched_idle_set_state(struct cpuidle_state *idle_state, int index);
+extern void sched_idle_set_state(struct cpuidle_state *idle_state);
 extern void default_idle_call(void);
 
 #ifdef CONFIG_ARCH_NEEDS_CPU_IDLE_COUPLED
@@ -306,5 +309,14 @@ static inline int cpuidle_register_governor(struct cpuidle_governor *gov)
 
 #define CPU_PM_CPU_IDLE_ENTER_RETENTION_PARAM(low_level_idle_enter, idx, state)	\
 	__CPU_PM_CPU_IDLE_ENTER(low_level_idle_enter, idx, state, 1)
+
+#ifdef CONFIG_ARM_QCOM_LPM_CPUIDLE
+extern bool lpm_sleep_disabled(void);
+#else
+static bool lpm_sleep_disabled(void)
+{
+	return false;
+}
+#endif
 
 #endif /* _LINUX_CPUIDLE_H */

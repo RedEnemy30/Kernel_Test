@@ -20,7 +20,6 @@
 #include <linux/sched.h>
 #include <linux/sched/idle.h>
 #include <linux/hypervisor.h>
-#include <linux/suspend.h>
 
 #include "smpboot.h"
 
@@ -213,9 +212,9 @@ void generic_smp_call_function_single_interrupt(void)
  */
 static void flush_smp_call_function_queue(bool warn_cpu_offline)
 {
-	call_single_data_t *csd, *csd_next;
-	struct llist_node *entry, *prev;
 	struct llist_head *head;
+	struct llist_node *entry;
+	call_single_data_t *csd, *csd_next;
 	static bool warned;
 
 	lockdep_assert_irqs_disabled();
@@ -239,37 +238,18 @@ static void flush_smp_call_function_queue(bool warn_cpu_offline)
 				csd->func);
 	}
 
-	/*
-	 * First; run all SYNC callbacks, people are waiting for us.
-	 */
-	prev = NULL;
 	llist_for_each_entry_safe(csd, csd_next, entry, llist) {
 		smp_call_func_t func = csd->func;
 		void *info = csd->info;
 
 		/* Do we wait until *after* callback? */
 		if (csd->flags & CSD_FLAG_SYNCHRONOUS) {
-			if (prev) {
-				prev->next = &csd_next->llist;
-			} else {
-				entry = &csd_next->llist;
-			}
 			func(info);
 			csd_unlock(csd);
 		} else {
-			prev = &csd->llist;
+			csd_unlock(csd);
+			func(info);
 		}
-	}
-
-	/*
-	 * Second; run all !SYNC callbacks.
-	 */
-	llist_for_each_entry_safe(csd, csd_next, entry, llist) {
-		smp_call_func_t func = csd->func;
-		void *info = csd->info;
-
-		csd_unlock(csd);
-		func(info);
 	}
 
 	/*
@@ -562,6 +542,7 @@ static int __init nosmp(char *str)
 
 early_param("nosmp", nosmp);
 
+#if NR_CPUS > BITS_PER_LONG
 /* this is hard limit */
 static int __init nrcpus(char *str)
 {
@@ -575,6 +556,7 @@ static int __init nrcpus(char *str)
 }
 
 early_param("nr_cpus", nrcpus);
+#endif
 
 static int __init maxcpus(char *str)
 {
@@ -600,14 +582,18 @@ static int __init boot_cpus(char *str)
 
 early_param("boot_cpus", boot_cpus);
 
+#if NR_CPUS > BITS_PER_LONG
 /* Setup number of possible processor ids */
 unsigned int nr_cpu_ids __read_mostly = NR_CPUS;
 EXPORT_SYMBOL(nr_cpu_ids);
+#endif
 
 /* An arch may set nr_cpu_ids earlier if needed, so this would be redundant */
 void __init setup_nr_cpu_ids(void)
 {
+#if NR_CPUS > BITS_PER_LONG
 	nr_cpu_ids = find_last_bit(cpumask_bits(cpu_possible_mask),NR_CPUS) + 1;
+#endif
 }
 
 static inline bool boot_cpu(int cpu)
@@ -807,15 +793,12 @@ void wake_up_all_idle_cpus(void)
 {
 	int cpu;
 
-	preempt_disable();
-	for_each_online_cpu(cpu) {
-		if (cpu == smp_processor_id())
-			continue;
-		if (s2idle_state == S2IDLE_STATE_ENTER ||
-		    !cpu_isolated(cpu))
+	for_each_possible_cpu(cpu) {
+		preempt_disable();
+		if (cpu != smp_processor_id() && cpu_online(cpu))
 			wake_up_if_idle(cpu);
+		preempt_enable();
 	}
-	preempt_enable();
 }
 EXPORT_SYMBOL_GPL(wake_up_all_idle_cpus);
 

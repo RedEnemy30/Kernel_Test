@@ -120,34 +120,34 @@ static int sc8551_mode_data[] = {
 #define VBAT_REG_STATUS_MASK		(1 << VBAT_REG_STATUS_SHIFT)
 #define IBAT_REG_STATUS_MASK		(1 << VBAT_REG_STATUS_SHIFT)
 
-#define sc_err(fmt, ...)								\
-do {											\
-	if (sc->mode == SC8551_ROLE_MASTER)						\
-		printk(KERN_ERR "[sc8551-MASTER]:%s:" fmt, __func__, ##__VA_ARGS__);	\
+#define sc_err(fmt, ...)							\
+do {										\
+	if (sc->mode == SC8551_ROLE_MASTER)					\
+		pr_err("[sc8551-MASTER]:%s:" fmt, __func__, ##__VA_ARGS__);	\
 	else if (sc->mode == SC8551_ROLE_SLAVE)					\
-		printk(KERN_ERR "[sc8551-SLAVE]:%s:" fmt, __func__, ##__VA_ARGS__);	\
-	else										\
-		printk(KERN_ERR "[sc8551-STANDALONE]:%s:" fmt, __func__, ##__VA_ARGS__);\
+		pr_err("[sc8551-SLAVE]:%s:" fmt, __func__, ##__VA_ARGS__);	\
+	else									\
+		pr_err("[sc8551-STANDALONE]:%s:" fmt, __func__, ##__VA_ARGS__);\
 } while(0);
 
-#define sc_info(fmt, ...)								\
-do {											\
-	if (sc->mode == SC8551_ROLE_MASTER)						\
-		printk(KERN_INFO "[sc8551-MASTER]:%s:" fmt, __func__, ##__VA_ARGS__);	\
+#define sc_info(fmt, ...)							\
+do {										\
+	if (sc->mode == SC8551_ROLE_MASTER)					\
+		pr_info("[sc8551-MASTER]:%s:" fmt, __func__, ##__VA_ARGS__);	\
 	else if (sc->mode == SC8551_ROLE_SLAVE)					\
-		printk(KERN_INFO "[sc8551-SLAVE]:%s:" fmt, __func__, ##__VA_ARGS__);	\
-	else										\
-		printk(KERN_INFO "[sc8551-STANDALONE]:%s:" fmt, __func__, ##__VA_ARGS__);\
+		pr_info("[sc8551-SLAVE]:%s:" fmt, __func__, ##__VA_ARGS__);	\
+	else									\
+		pr_info("[sc8551-STANDALONE]:%s:" fmt, __func__, ##__VA_ARGS__);\
 } while(0);
 
-#define sc_dbg(fmt, ...)								\
-do {											\
-	if (sc->mode == SC8551_ROLE_MASTER)						\
-		printk(KERN_DEBUG "[sc8551-MASTER]:%s:" fmt, __func__, ##__VA_ARGS__);	\
+#define sc_dbg(fmt, ...)							\
+do {										\
+	if (sc->mode == SC8551_ROLE_MASTER)					\
+		pr_debug("[sc8551-MASTER]:%s:" fmt, __func__, ##__VA_ARGS__);	\
 	else if (sc->mode == SC8551_ROLE_SLAVE)					\
-		printk(KERN_DEBUG "[sc8551-SLAVE]:%s:" fmt, __func__, ##__VA_ARGS__);	\
-	else										\
-		printk(KERN_DEBUG "[sc8551-STANDALONE]:%s:" fmt, __func__, ##__VA_ARGS__);\
+		pr_debug("[sc8551-SLAVE]:%s:" fmt, __func__, ##__VA_ARGS__);	\
+	else									\
+		pr_debug("[sc8551-STANDALONE]:%s:" fmt, __func__, ##__VA_ARGS__);\
 } while(0);
 
 
@@ -2412,7 +2412,7 @@ static int sc8551_suspend(struct device *dev)
 	mutex_unlock(&sc->irq_complete);
 	sc8551_enable_adc(sc, false);
 	sc->adc_status = 0;
-	sc_err("Suspend successfully!");
+	sc_dbg("Suspend successfully!");
 
 	return 0;
 }
@@ -2453,7 +2453,7 @@ static int sc8551_resume(struct device *dev)
 #else
 	power_supply_changed(sc->fc2_psy);
 #endif	
-	sc_err("Resume successfully!");
+	sc_dbg("Resume successfully!");
 //	sc8551_enable_adc(sc, true);
 
 	return 0;

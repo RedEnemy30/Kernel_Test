@@ -24,7 +24,7 @@
 	#size-cells = <2>;
 
 	chosen {
-		bootargs = "log_buf_len=256K rcupdate.rcu_expedited=1 rcu_nocbs=0-7 kpti=off";
+		bootargs = "log_buf_len=256K rcupdate.rcu_expedited=1 rcu_nocbs=0-7 kpti=off noirqdebug";
 	};
 
 	memory {
@@ -1307,10 +1307,19 @@
 		#freq-domain-cells = <2>;
 
 		qcom,cpufreq-table-0 =
+			<576000>,
+			<691200>,
+			<940800>,
+			<1113600>,
+			<1324800>,
+			<1516800>,
+			<1651200>,
 			<1708800>,
 			<1804800>;
 
 		qcom,cpufreq-table-1 =
+			<691200>,
+			<940800>,
 			<1228800>,
 			<1401600>,
 			<1516800>,

@@ -119,14 +119,6 @@ struct task_group;
 					 (task->flags & PF_FROZEN) == 0 && \
 					 (task->state & TASK_NOLOAD) == 0)
 
-enum task_boost_type {
-	TASK_BOOST_NONE = 0,
-	TASK_BOOST_ON_MID,
-	TASK_BOOST_ON_MAX,
-	TASK_BOOST_STRICT_MAX,
-	TASK_BOOST_END,
-};
-
 #ifdef CONFIG_DEBUG_ATOMIC_SLEEP
 
 /*
@@ -221,42 +213,6 @@ enum task_boost_type {
 
 /* Task command name length: */
 #define TASK_COMM_LEN			16
-
-enum task_event {
-	PUT_PREV_TASK   = 0,
-	PICK_NEXT_TASK  = 1,
-	TASK_WAKE       = 2,
-	TASK_MIGRATE    = 3,
-	TASK_UPDATE     = 4,
-	IRQ_UPDATE      = 5,
-};
-
-/* Note: this need to be in sync with migrate_type_names array */
-enum migrate_types {
-	GROUP_TO_RQ,
-	RQ_TO_GROUP,
-};
-
-#if defined(CONFIG_HOTPLUG_CPU) && defined(CONFIG_SCHED_WALT)
-extern int sched_isolate_cpu(int cpu);
-extern int sched_unisolate_cpu(int cpu);
-extern int sched_unisolate_cpu_unlocked(int cpu);
-#else
-static inline int sched_isolate_cpu(int cpu)
-{
-	return 0;
-}
-
-static inline int sched_unisolate_cpu(int cpu)
-{
-	return 0;
-}
-
-static inline int sched_unisolate_cpu_unlocked(int cpu)
-{
-	return 0;
-}
-#endif
 
 extern void scheduler_tick(void);
 
@@ -389,11 +345,19 @@ struct load_weight {
  * Only for tasks we track a moving average of the past instantaneous
  * estimated utilization. This allows to absorb sporadic drops in utilization
  * of an otherwise almost periodic task.
+ *
+ * The UTIL_AVG_UNCHANGED flag is used to synchronize util_est with util_avg
+ * updates. When a task is dequeued, its util_est should not be updated if its
+ * util_avg has not been updated in the meantime.
+ * This information is mapped into the MSB bit of util_est.enqueued at dequeue
+ * time. Since max value of util_est.enqueued for a task is 1024 (PELT util_avg
+ * for a task) it is safe to use MSB.
  */
 struct util_est {
 	unsigned int			enqueued;
 	unsigned int			ewma;
-#define UTIL_EST_WEIGHT_SHIFT		2
+#define UTIL_EST_WEIGHT_SHIFT		5
+#define UTIL_AVG_UNCHANGED		0x80000000
 } __attribute__((__aligned__(sizeof(u64))));
 
 /*
@@ -528,129 +492,6 @@ struct sched_entity {
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
 };
-
-struct cpu_cycle_counter_cb {
-	u64 (*get_cpu_cycle_counter)(int cpu);
-};
-
-DECLARE_PER_CPU_READ_MOSTLY(int, sched_load_boost);
-
-#ifdef CONFIG_QCOM_HYP_CORE_CTL
-extern int hh_vcpu_populate_affinity_info(u32 cpu_index, u64 cap_id);
-extern int hh_vpm_grp_populate_info(u64 cap_id, int virq_num);
-#else
-static inline int hh_vcpu_populate_affinity_info(u32 cpu_index, u64 cap_id)
-{
-	return 0;
-}
-static inline int  hh_vpm_grp_populate_info(u64 cap_id, int virq_num)
-{
-	return 0;
-}
-#endif /* CONFIG_QCOM_HYP_CORE_CTL */
-
-#ifdef CONFIG_SCHED_WALT
-extern void walt_task_dead(struct task_struct *p);
-extern int
-register_cpu_cycle_counter_cb(struct cpu_cycle_counter_cb *cb);
-extern void
-sched_update_cpu_freq_min_max(const cpumask_t *cpus, u32 fmin, u32 fmax);
-extern int set_task_boost(int boost, u64 period);
-extern void walt_update_cluster_topology(void);
-
-/*
- * RAVG_HIST_SHIFT trick can only be used if RAVG_HIST_SIZE is a power of 2.
- */
-#define RAVG_HIST_SIZE 8
-#define RAVG_HIST_SHIFT 3
-#define RAVG_HIST_MASK (RAVG_HIST_SIZE - 1)
-
-#define NUM_BUSY_BUCKETS 10
-
-#define WALT_LOW_LATENCY_PROCFS	BIT(0)
-#define WALT_LOW_LATENCY_BINDER	BIT(1)
-
-struct walt_task_struct {
-	/*
-	 * 'mark_start' marks the beginning of an event (task waking up, task
-	 * starting to execute, task being preempted) within a window
-	 *
-	 * 'sum' represents how runnable a task has been within current
-	 * window. It incorporates both running time and wait time and is
-	 * frequency scaled.
-	 *
-	 * 'sum_history' keeps track of history of 'sum' seen over previous
-	 * RAVG_HIST_SIZE windows. Windows where task was entirely sleeping are
-	 * ignored.
-	 *
-	 * 'demand' represents maximum sum seen over previous
-	 * sysctl_sched_ravg_hist_size windows. 'demand' could drive frequency
-	 * demand for tasks.
-	 *
-	 * 'curr_window_cpu' represents task's contribution to cpu busy time on
-	 * various CPUs in the current window
-	 *
-	 * 'prev_window_cpu' represents task's contribution to cpu busy time on
-	 * various CPUs in the previous window
-	 *
-	 * 'curr_window' represents the sum of all entries in curr_window_cpu
-	 *
-	 * 'prev_window' represents the sum of all entries in prev_window_cpu
-	 *
-	 * 'pred_demand' represents task's current predicted cpu busy time
-	 *
-	 * 'busy_buckets' groups historical busy time into different buckets
-	 * used for prediction
-	 *
-	 * 'demand_scaled' represents task's demand scaled to 1024
-	 */
-	u64				mark_start;
-	u32				sum, demand;
-	u32				coloc_demand;
-	u32				sum_history[RAVG_HIST_SIZE];
-	u32				curr_window_cpu[CONFIG_NR_CPUS], prev_window_cpu[CONFIG_NR_CPUS];
-	u32				curr_window, prev_window;
-	u32				pred_demand;
-	u8				busy_buckets[NUM_BUSY_BUCKETS];
-	u16				bucket_bitmask;
-	u16				demand_scaled;
-	u16				pred_demand_scaled;
-	u64				active_time;
-	int				boost;
-	bool				wake_up_idle;
-	bool				misfit;
-	bool				rtg_high_prio;
-	u8				low_latency;
-	u64				boost_period;
-	u64				boost_expires;
-	u64				last_sleep_ts;
-	u32				init_load_pct;
-	u32				unfilter;
-	u64				last_wake_ts;
-	u64				last_enqueued_ts;
-	struct walt_related_thread_group __rcu	*grp;
-	struct list_head		grp_list;
-	u64				cpu_cycles;
-	cpumask_t			cpus_requested;
-	bool				iowaited;
-	int				cidx;
-};
-
-#else
-static inline void walt_task_dead(struct task_struct *p) { }
-
-static inline int
-register_cpu_cycle_counter_cb(struct cpu_cycle_counter_cb *cb)
-{
-	return 0;
-}
-
-static inline void sched_update_cpu_freq_min_max(const cpumask_t *cpus,
-					u32 fmin, u32 fmax) { }
-
-static inline void set_task_boost(int boost, u64 period) { }
-static inline void walt_update_cluster_topology(void) { }
-#endif /* CONFIG_SCHED_WALT */
 
 struct sched_rt_entity {
 	struct list_head		run_list;
@@ -854,11 +695,6 @@ struct task_struct {
 	const struct sched_class	*sched_class;
 	struct sched_entity		se;
 	struct sched_rt_entity		rt;
-
-#ifdef CONFIG_SCHED_WALT
-	struct walt_task_struct		wts;
-#endif
-
 #ifdef CONFIG_CGROUP_SCHED
 	struct task_group		*sched_task_group;
 #endif
@@ -950,10 +786,6 @@ struct task_struct {
 #endif
 #ifdef CONFIG_MEMCG
 	unsigned			in_user_fault:1;
-#endif
-#ifdef CONFIG_LRU_GEN
-	/* whether the LRU algorithm may apply to this access */
-	unsigned			in_lru_fault:1;
 #endif
 #ifdef CONFIG_COMPAT_BRK
 	unsigned			brk_randomized:1;
@@ -1090,10 +922,8 @@ struct task_struct {
 	struct sysv_shm			sysvshm;
 #endif
 #ifdef CONFIG_DETECT_HUNG_TASK
-	/* hung task detection */
 	unsigned long			last_switch_count;
 	unsigned long			last_switch_time;
-	bool hang_detection_enabled;
 #endif
 	/* Filesystem information: */
 	struct fs_struct		*fs;
@@ -1181,7 +1011,7 @@ struct task_struct {
 	struct held_lock		held_locks[MAX_LOCK_DEPTH];
 #endif
 
-#ifdef CONFIG_UBSAN
+#if defined(CONFIG_UBSAN) && !defined(CONFIG_UBSAN_TRAP)
 	unsigned int			in_ubsan;
 #endif
 
@@ -1468,6 +1298,10 @@ struct task_struct {
 #ifdef CONFIG_GCC_PLUGIN_STACKLEAK
 	unsigned long			lowest_stack;
 	unsigned long			prev_lowest_stack;
+#endif
+
+#ifdef CONFIG_SPRD_ROTATION_TASK
+	u64 last_enqueue_ts;
 #endif
 
 	ANDROID_VENDOR_DATA_ARRAY(1, 3);
@@ -1818,6 +1652,9 @@ extern int idle_cpu(int cpu);
 extern int available_idle_cpu(int cpu);
 extern int sched_setscheduler(struct task_struct *, int, const struct sched_param *);
 extern int sched_setscheduler_nocheck(struct task_struct *, int, const struct sched_param *);
+extern int sched_set_fifo(struct task_struct *p);
+extern int sched_set_fifo_low(struct task_struct *p);
+extern int sched_set_normal(struct task_struct *p, int nice);
 extern int sched_setattr(struct task_struct *, const struct sched_attr *);
 extern int sched_setattr_nocheck(struct task_struct *, const struct sched_attr *);
 extern struct task_struct *idle_task(int cpu);
@@ -2069,6 +1906,15 @@ extern long sched_getaffinity(pid_t pid, struct cpumask *mask);
 #define TASK_SIZE_OF(tsk)	TASK_SIZE
 #endif
 
+#ifdef CONFIG_CPU_FREQ_GOV_SCHEDUTIL
+unsigned long sched_cpu_util(int cpu);
+#else
+static inline unsigned long sched_cpu_util(int cpu)
+{
+	return 0;
+}
+#endif
+
 #ifdef CONFIG_RSEQ
 
 /*
@@ -2208,38 +2054,5 @@ const struct sched_avg *sched_trace_rq_avg_irq(struct rq *rq);
 int sched_trace_rq_cpu(struct rq *rq);
 
 const struct cpumask *sched_trace_rd_span(struct root_domain *rd);
-
-#ifdef CONFIG_SCHED_WALT
-#define PF_WAKE_UP_IDLE	1
-static inline u32 sched_get_wake_up_idle(struct task_struct *p)
-{
-	return p->wts.wake_up_idle;
-}
-
-static inline int sched_set_wake_up_idle(struct task_struct *p,
-						int wake_up_idle)
-{
-	p->wts.wake_up_idle = !!wake_up_idle;
-	return 0;
-}
-
-static inline void set_wake_up_idle(bool enabled)
-{
-	current->wts.wake_up_idle = enabled;
-}
-#else
-static inline u32 sched_get_wake_up_idle(struct task_struct *p)
-{
-	return 0;
-}
-
-static inline int sched_set_wake_up_idle(struct task_struct *p,
-						int wake_up_idle)
-{
-	return 0;
-}
-
-static inline void set_wake_up_idle(bool enabled) {}
-#endif
 
 #endif

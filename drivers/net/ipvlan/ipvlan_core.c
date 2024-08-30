@@ -440,14 +440,14 @@ static noinline_for_stack int ipvlan_process_v4_outbound(struct sk_buff *skb)
 
 	memset(IPCB(skb), 0, sizeof(*IPCB(skb)));
 
-	err = ip_local_out(net, skb->sk, skb);
+	err = ip_local_out(net, NULL, skb);
 	if (unlikely(net_xmit_eval(err)))
-		DEV_STATS_INC(dev, tx_errors);
+		dev->stats.tx_errors++;
 	else
 		ret = NET_XMIT_SUCCESS;
 	goto out;
 err:
-	DEV_STATS_INC(dev, tx_errors);
+	dev->stats.tx_errors++;
 	kfree_skb(skb);
 out:
 	return ret;
@@ -488,16 +488,16 @@ static int ipvlan_process_v6_outbound(struct sk_buff *skb)
 
 	err = ipvlan_route_v6_outbound(dev, skb);
 	if (unlikely(err)) {
-		DEV_STATS_INC(dev, tx_errors);
+		dev->stats.tx_errors++;
 		kfree_skb(skb);
 		return err;
 	}
 
 	memset(IP6CB(skb), 0, sizeof(*IP6CB(skb)));
 
-	err = ip6_local_out(dev_net(dev), skb->sk, skb);
+	err = ip6_local_out(dev_net(dev), NULL, skb);
 	if (unlikely(net_xmit_eval(err)))
-		DEV_STATS_INC(dev, tx_errors);
+		dev->stats.tx_errors++;
 	else
 		ret = NET_XMIT_SUCCESS;
 	return ret;

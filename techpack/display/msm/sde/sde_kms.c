@@ -968,7 +968,7 @@ static void _sde_kms_drm_check_dpms(struct drm_atomic_state *old_state,
 			old_mode = DRM_PANEL_BLANK_POWERDOWN;
 		}
 
-		if ((old_mode != new_mode) || (old_fps != new_fps)) {
+		if (old_mode != new_mode) {
 			struct drm_panel_notifier notifier_data;
 
 			SDE_EVT32(old_mode, new_mode, old_fps, new_fps,
@@ -3851,6 +3851,7 @@ static int _sde_kms_pm_deepsleep_helper(struct sde_kms *sde_kms, bool enter)
 	if (mem_sleep_current != PM_SUSPEND_MEM)
 		return 0;
 
+	/*Applicable for both deepsleep and hibernation*/
 	SDE_INFO("Deepsleep : enter %d\n", enter);
 
 	for (i = 0; i < sde_kms->dsi_display_count; i++) {
@@ -3859,9 +3860,9 @@ static int _sde_kms_pm_deepsleep_helper(struct sde_kms *sde_kms, bool enter)
 
 
 		if (enter) {
-			/* During deepsleep, clk_parent are reset at HW
-			 * but sw caching is retained in clk framework. To
-			 * maintain same state. unset parents and restore
+			/* During deepsleep/hibernation, clk_parent are reset
+			 * at HW but sw caching is retained in clk framework.
+			 * To maintain same state. unset parents and restore
 			 * during exit.
 			 */
 			if (dsi_display->needs_clk_src_reset)

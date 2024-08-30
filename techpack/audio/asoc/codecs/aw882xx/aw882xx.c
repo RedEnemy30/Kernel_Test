@@ -59,7 +59,7 @@ static const char *const aw882xx_spin[] = {"spin_0", "spin_90",
 					"spin_180", "spin_270"};
 #endif
 
-static enum smartpa_type smartpa_type = PA_INVALID;
+static enum smartpa_type smartpa_type = FS1962;
 module_param(smartpa_type, int, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(smartpa_type, "Show SmartPA type");
 
@@ -403,10 +403,10 @@ static int aw882xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 		aw_componet_codec_ops.codec_get_drvdata(codec);
 	int ret = 0;
 
-	aw_dev_info(aw882xx->dev, "mute state=%d", mute);
+	aw_dev_dbg(aw882xx->dev, "mute state=%d", mute);
 
 	if (stream != SNDRV_PCM_STREAM_PLAYBACK) {
-		aw_dev_info(aw882xx->dev, "capture");
+		aw_dev_dbg(aw882xx->dev, "capture");
 		return 0;
 	}
 
@@ -2198,7 +2198,7 @@ static int aw882xx_i2c_probe(struct i2c_client *i2c,
 		snd_soc_set_smartpa_type(__func__, AW88261);
 #endif
 	} else {
-		smartpa_type = FS1962;
+		smartpa_type = PA_INVALID;
 	}
 
 	/*aw pa init*/

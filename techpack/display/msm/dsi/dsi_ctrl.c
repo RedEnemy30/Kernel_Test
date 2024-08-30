@@ -1257,7 +1257,6 @@ int dsi_message_validate_tx_mode(struct dsi_ctrl *dsi_ctrl,
 				"Cannot transfer, size: %zu is greater than %d\n",
 				transfer_size,
 				DSI_EMBEDDED_MODE_DMA_MAX_SIZE_BYTES);
-
 			return -ENOTSUPP;
 		}
 	}
@@ -1603,7 +1602,7 @@ static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,
 
 	if ((msg->flags & MIPI_DSI_MSG_LASTCOMMAND) ||
 			(*flags & DSI_CTRL_CMD_LAST_COMMAND))
-		packet.header[3] |= BIT(7); //set the last cmd bit in header.
+		packet.header[3] |= BIT(7);//set the last cmd bit in header.
 
 	if (*flags & DSI_CTRL_CMD_FETCH_MEMORY) {
 		msm_gem_sync(dsi_ctrl->tx_cmd_buf);

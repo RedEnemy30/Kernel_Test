@@ -44,13 +44,13 @@
 #include <linux/regulator/consumer.h>
 #endif
 #if defined(CONFIG_DRM)
-//#elif defined(CONFIG_FB)
+#include <drm/drm_panel.h>
+#elif defined(CONFIG_FB)
 #include <linux/notifier.h>
 #include <linux/fb.h>
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 #include <linux/earlysuspend.h>
 #endif
-#include <linux/pm_qos.h>
 
 #define GOODIX_FLASH_CONFIG_WITH_ISP	1
 
@@ -481,12 +481,11 @@ struct goodix_ts_core {
 	struct mutex call_back;
 #if defined(CONFIG_DRM)
 	struct notifier_block drm_notifier;
-//#elif defined(CONFIG_FB)
+#elif defined(CONFIG_FB)
 	struct notifier_block fb_notifier;
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 	struct early_suspend early_suspend;
 #endif
-	struct pm_qos_request pm_qos_req;
 };
 
 /* external module structures */
@@ -793,6 +792,7 @@ extern int sync_read_rawdata( unsigned int reg,
 		unsigned char *data, unsigned int len);
 int goodix_get_cfg_value(struct goodix_ts_core *core_data,
 			u8 *config, u8 *buf, u8 len, u8 sub_bag_num, u8 offset);
+struct drm_panel *goodix_get_panel(void);
 #if defined(CONFIG_WT_QGKI)
 extern void goodix_charger_in(struct goodix_ts_core *core_data);
 extern void goodix_charger_out(struct goodix_ts_core *core_data);

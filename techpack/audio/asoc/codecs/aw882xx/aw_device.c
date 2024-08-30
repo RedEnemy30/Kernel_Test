@@ -621,7 +621,7 @@ static int aw_dev_reg_fw_update(struct aw_device *aw_dev)
 		/*keep amppd status*/
 		if (reg_addr == aw_dev->amppd_desc.reg) {
 			aw_dev->amppd_st = reg_val & (~aw_dev->amppd_desc.mask);
-			aw_dev_info(aw_dev->dev, "amppd_st=0x%04x", aw_dev->amppd_st);
+			aw_dev_dbg(aw_dev->dev, "amppd_st=0x%04x", aw_dev->amppd_st);
 			aw_dev->ops.aw_i2c_read(aw_dev,
 			(unsigned char)reg_addr,
 			(unsigned int *)&read_val);
@@ -643,7 +643,7 @@ static int aw_dev_reg_fw_update(struct aw_device *aw_dev)
 		if (reg_addr == aw_dev->mute_desc.reg) {
 			/*get bin value*/
 			aw_dev->mute_st = reg_val & (~aw_dev->mute_desc.mask);
-			aw_dev_info(aw_dev->dev, "mute_st=0x%04x", aw_dev->mute_st);
+			aw_dev_dbg(aw_dev->dev, "mute_st=0x%04x", aw_dev->mute_st);
 			aw_dev->ops.aw_i2c_read(aw_dev,
 			(unsigned char)reg_addr,
 			(unsigned int *)&read_val);

@@ -544,10 +544,8 @@ static void binder_wakeup_poll_threads_ilocked(struct binder_proc *proc,
 #ifdef CONFIG_SCHED_WALT
 			if (thread->task && current->signal &&
 				(current->signal->oom_score_adj == 0) &&
-				((current->prio < DEFAULT_PRIO) ||
-					(thread->task->group_leader->prio < MAX_RT_PRIO)))
-				thread->task->wts.low_latency |=
-						WALT_LOW_LATENCY_BINDER;
+				(current->prio < DEFAULT_PRIO))
+				thread->task->wts.low_latency = true;
 #endif
 			if (sync)
 				wake_up_interruptible_sync(&thread->wait);
@@ -611,10 +609,8 @@ static void binder_wakeup_thread_ilocked(struct binder_proc *proc,
 #ifdef CONFIG_SCHED_WALT
 		if (thread->task && current->signal &&
 			(current->signal->oom_score_adj == 0) &&
-			((current->prio < DEFAULT_PRIO) ||
-				(thread->task->group_leader->prio < MAX_RT_PRIO)))
-			thread->task->wts.low_latency |=
-					WALT_LOW_LATENCY_BINDER;
+			(current->prio < DEFAULT_PRIO))
+			thread->task->wts.low_latency = true;
 #endif
 		if (sync)
 			wake_up_interruptible_sync(&thread->wait);
@@ -1836,8 +1832,10 @@ static size_t binder_get_object(struct binder_proc *proc,
 	size_t object_size = 0;
 
 	read_size = min_t(size_t, sizeof(*object), buffer->data_size - offset);
-	if (offset > buffer->data_size || read_size < sizeof(*hdr))
+	if (offset > buffer->data_size || read_size < sizeof(*hdr) ||
+	    !IS_ALIGNED(offset, sizeof(u32)))
 		return 0;
+
 	if (u) {
 		if (copy_from_user(object, u + offset, read_size))
 			return 0;
@@ -4809,9 +4807,8 @@ retry:
 
 		trace_binder_transaction_received(t);
 #ifdef CONFIG_SCHED_WALT
-		if (current->wts.low_latency & WALT_LOW_LATENCY_BINDER)
-			thread->task->wts.low_latency &=
-						~WALT_LOW_LATENCY_BINDER;
+		if (current->wts.low_latency)
+			current->wts.low_latency = false;
 #endif
 		binder_stat_br(proc, thread, cmd);
 		binder_debug(BINDER_DEBUG_TRANSACTION,

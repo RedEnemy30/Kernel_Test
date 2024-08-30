@@ -141,6 +141,7 @@ static ssize_t write_irq_affinity(int type, struct file *file,
 	cpumask_var_t new_value;
 	int err;
 
+	return count;
 	if (!irq_can_set_affinity_usr(irq) || no_irq_affinity)
 		return -EIO;
 
@@ -153,13 +154,6 @@ static ssize_t write_irq_affinity(int type, struct file *file,
 		err = cpumask_parse_user(buffer, count, new_value);
 	if (err)
 		goto free_cpumask;
-
-#ifdef CONFIG_SCHED_WALT
-	if (cpumask_subset(new_value, cpu_isolated_mask)) {
-		err = -EINVAL;
-		goto free_cpumask;
-	}
-#endif
 
 	/*
 	 * Do not allow disabling IRQs completely - it's a too easy

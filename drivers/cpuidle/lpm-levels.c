@@ -42,6 +42,9 @@
 #include "lpm-levels.h"
 #include <trace/events/power.h>
 #include <linux/clk.h>
+#ifdef CONFIG_DRM_PANEL
+#include <drm/drm_panel.h>
+#endif
 #define CREATE_TRACE_POINTS
 #include <trace/events/trace_msm_low_power.h>
 
@@ -93,8 +96,46 @@ static void cluster_prepare(struct lpm_cluster *cluster,
 		const struct cpumask *cpu, int child_idx, bool from_idle,
 		int64_t time);
 
+#ifdef CONFIG_DRM_PANEL
+static bool sleep_disabled = true;
+module_param_named(sleep_disabled, sleep_disabled, bool, 0444);
+
+static int lpm_drm_panel_notify(struct notifier_block *nb,
+		unsigned long val, void *ptr)
+{
+	struct drm_panel_notifier *evdata = ptr;
+	int *blank = evdata->data;
+
+	switch (*blank) {
+	case DRM_PANEL_BLANK_UNBLANK:
+		if (val == DRM_PANEL_EARLY_EVENT_BLANK) {
+			sleep_disabled = true;
+			wake_up_all_idle_cpus();
+		}
+		break;
+	case DRM_PANEL_BLANK_POWERDOWN:
+	case DRM_PANEL_BLANK_LP:
+		if (val == DRM_PANEL_EARLY_EVENT_BLANK) {
+			sleep_disabled = false;
+			wake_up_all_idle_cpus();
+		}
+		break;
+	default:
+		break;
+	};
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block drm_notifier = {
+	.notifier_call = lpm_drm_panel_notify,
+};
+
+extern struct drm_panel *goodix_get_panel(void);
+#else
 static bool sleep_disabled;
 module_param_named(sleep_disabled, sleep_disabled, bool, 0664);
+#endif
 
 #ifdef CONFIG_SMP
 static int lpm_cpu_qos_notify(struct notifier_block *nb,
@@ -115,6 +156,11 @@ static bool check_cpu_isolated(int cpu)
 {
 	return false;
 }
+
+static inline uint64_t sched_lpm_disallowed_time(int cpu)
+{
+	return 0;
+}
 #endif
 
 #ifdef CONFIG_SMP
@@ -122,6 +168,9 @@ static int lpm_cpu_qos_notify(struct notifier_block *nb,
 		unsigned long val, void *ptr)
 {
 	int cpu = nb - dev_pm_qos_nb;
+
+	if (sleep_disabled)
+		return NOTIFY_OK;
 
 	preempt_disable();
 	if (cpu != smp_processor_id() && cpu_online(cpu) &&
@@ -156,6 +205,12 @@ static int lpm_online_cpu(unsigned int cpu)
 	return 0;
 }
 #endif
+
+bool lpm_sleep_disabled(void)
+{
+	return sleep_disabled;
+}
+EXPORT_SYMBOL(lpm_sleep_disabled);
 
 #ifdef CONFIG_MSM_PM
 /**
@@ -230,13 +285,11 @@ static void disable_rimps_timer(struct lpm_cpu *cpu)
 	if (!cpu->rimps_tmr_base)
 		return;
 
-	spin_lock(&cpu->cpu_lock);
 	ctrl_val = readl_relaxed(cpu->rimps_tmr_base + TIMER_CTRL);
 	writel_relaxed(ctrl_val & ~(TIMER_CONTROL_EN),
 				cpu->rimps_tmr_base + TIMER_CTRL);
 	/* Ensure the write is complete before returning. */
 	wmb();
-	spin_unlock(&cpu->cpu_lock);
 
 }
 
@@ -259,10 +312,9 @@ static void program_rimps_timer(struct lpm_cpu *cpu)
 		return;
 
 	next_event = us_to_ticks(next_event);
-	spin_lock(&cpu->cpu_lock);
 
 	/* RIMPS timer pending should be read before programming timeout val */
-	readl_relaxed(cpu->rimps_tmr_base + TIMER_PENDING);
+	readl(cpu->rimps_tmr_base + TIMER_PENDING);
 	ctrl_val = readl_relaxed(cpu->rimps_tmr_base + TIMER_CTRL);
 	writel_relaxed(ctrl_val & ~(TIMER_CONTROL_EN),
 				cpu->rimps_tmr_base + TIMER_CTRL);
@@ -271,7 +323,6 @@ static void program_rimps_timer(struct lpm_cpu *cpu)
 				cpu->rimps_tmr_base + TIMER_CTRL);
 	/* Ensure the write is complete before returning. */
 	wmb();
-	spin_unlock(&cpu->cpu_lock);
 }
 
 #ifdef CONFIG_SMP
@@ -598,15 +649,12 @@ static void clear_predict_history(void)
 
 static void update_history(struct cpuidle_device *dev, int idx);
 
-static inline bool lpm_disallowed(s64 sleep_us, int cpu, struct lpm_cpu *pm_cpu)
+static inline bool lpm_disallowed(int cpu, struct lpm_cpu *pm_cpu)
 {
 	uint64_t bias_time = 0;
 
 	if (check_cpu_isolated(cpu))
 		goto out;
-
-	if (sleep_disabled || sleep_us < 0)
-		return true;
 
 	bias_time = sched_lpm_disallowed_time(cpu);
 	if (bias_time) {
@@ -636,12 +684,10 @@ static inline uint32_t get_cpus_qos(const struct cpumask *mask)
 }
 
 static int cpu_power_select(struct cpuidle_device *dev,
-		struct lpm_cpu *cpu)
+		struct lpm_cpu *cpu, s64 sleep_us)
 {
-	ktime_t delta_next;
 	int best_level = 0;
 	uint32_t latency_us = get_cpus_qos(cpumask_of(dev->cpu));
-	s64 sleep_us = ktime_to_us(tick_nohz_get_sleep_length(&delta_next));
 	int i, idx_restrict;
 	uint32_t lvl_latency_us = 0;
 	uint64_t predicted = 0;
@@ -650,7 +696,7 @@ static int cpu_power_select(struct cpuidle_device *dev,
 	uint32_t min_residency, max_residency;
 	struct power_params *pwr_params;
 
-	if (lpm_disallowed(sleep_us, dev->cpu, cpu))
+	if (lpm_disallowed(dev->cpu, cpu))
 		goto done_select;
 
 	idx_restrict = cpu->nlevels + 1;
@@ -1331,11 +1377,18 @@ static int lpm_cpuidle_select(struct cpuidle_driver *drv,
 		struct cpuidle_device *dev, bool *stop_tick)
 {
 	struct lpm_cpu *cpu = per_cpu(cpu_lpm, dev->cpu);
+	ktime_t delta_next;
+	ktime_t duration = tick_nohz_get_sleep_length(&delta_next);
 
-	if (!cpu)
+	if (duration <= 0)
+		duration = S64_MAX;
+	if (duration <= TICK_NSEC)
+		*stop_tick = false;
+
+	if (!cpu || sleep_disabled)
 		return 0;
 
-	return cpu_power_select(dev, cpu);
+	return cpu_power_select(dev, cpu, ktime_to_us(duration));
 }
 
 #ifdef CONFIG_MSM_PM
@@ -1399,6 +1452,11 @@ static int lpm_cpuidle_enter(struct cpuidle_device *dev,
 	uint64_t start_time = ktime_to_ns(start), end_time;
 	int ret = -EBUSY;
 
+	if (sleep_disabled) {
+		cpu_do_idle();
+		return 0;
+	}
+
 	/* Read the timer from the CPU that is entering idle */
 	per_cpu(next_hrtimer, dev->cpu) = tick_nohz_get_next_hrtimer();
 
@@ -1417,9 +1475,9 @@ static int lpm_cpuidle_enter(struct cpuidle_device *dev,
 	ret = psci_enter_sleep(cpu, idx, true);
 	success = (ret == 0);
 
-exit:
 	if (idx == cpu->nlevels - 1)
 		disable_rimps_timer(cpu);
+exit:
 	end_time = ktime_to_ns(ktime_get());
 	lpm_stats_cpu_exit(idx, end_time, success);
 
@@ -1433,7 +1491,8 @@ exit:
 		clusttimer_cancel();
 	}
 	if (cpu->bias) {
-		biastimer_cancel();
+                if (!idx)
+			biastimer_cancel();
 		cpu->bias = 0;
 	}
 	local_irq_enable();
@@ -1709,6 +1768,29 @@ static int lpm_probe(struct platform_device *pdev)
 	unsigned int cpu;
 	struct hrtimer *cpu_histtimer;
 	struct kobject *module_kobj = NULL;
+#ifdef CONFIG_ARCH_BLAIR
+	int i;
+	struct cpufreq_policy policy;
+	const struct {
+		int cpu;
+		int freq;
+	} eff_table[] = {
+		0, 940800,
+		6, 1228800,
+	};
+#endif
+#ifdef CONFIG_DRM_PANEL
+	struct drm_panel *active_panel = goodix_get_panel();
+
+	if (!active_panel)
+		return -EPROBE_DEFER;
+
+	ret = drm_panel_notifier_register(active_panel, &drm_notifier);
+	if (ret)
+		pr_err("Failed to register drm panel notifier: %d\n", ret);
+	else
+		pr_info("Registered drm panel notifier\n");
+#endif
 
 	get_online_cpus();
 	lpm_root_node = lpm_of_parse_cluster(pdev);
@@ -1770,6 +1852,12 @@ static int lpm_probe(struct platform_device *pdev)
 
 	suspend_set_ops(&lpm_suspend_ops);
 	s2idle_set_ops(&lpm_s2idle_ops);
+
+#ifdef CONFIG_ARCH_BLAIR
+	for (i = 0; i < ARRAY_SIZE(eff_table); ++i)
+		if (!cpufreq_get_policy(&policy, eff_table[i].cpu))
+			freq_qos_update_request(policy.min_freq_req, eff_table[i].freq);
+#endif
 
 	return 0;
 failed:

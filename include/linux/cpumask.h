@@ -35,6 +35,8 @@ typedef struct cpumask { DECLARE_BITMAP(bits, NR_CPUS); } cpumask_t;
 
 #if NR_CPUS == 1
 #define nr_cpu_ids		1U
+#elif NR_CPUS <= BITS_PER_LONG
+#define nr_cpu_ids		((unsigned int)NR_CPUS)
 #else
 extern unsigned int nr_cpu_ids;
 #endif
@@ -56,6 +58,9 @@ extern unsigned int nr_cpu_ids;
  *     cpu_online_mask  - has bit 'cpu' set iff cpu available to scheduler
  *     cpu_active_mask  - has bit 'cpu' set iff cpu available to migration
  *     cpu_isolated_mask- has bit 'cpu' set iff cpu isolated
+ *     cpu_lp_mask      - has bit 'cpu' set iff cpu is part of little cluster
+ *     cpu_perf_mask    - has bit 'cpu' set iff cpu is part of big cluster
+ *     cpu_prime_mask   - has bit 'cpu' set iff cpu is part of prime cluster
  *
  *  If !CONFIG_HOTPLUG_CPU, present == possible, and active == online.
  *
@@ -97,12 +102,10 @@ extern struct cpumask __cpu_active_mask;
 #define cpu_present_mask  ((const struct cpumask *)&__cpu_present_mask)
 #define cpu_active_mask   ((const struct cpumask *)&__cpu_active_mask)
 
-#ifdef CONFIG_SCHED_WALT
-extern struct cpumask __cpu_isolated_mask;
-#define cpu_isolated_mask ((const struct cpumask *)&__cpu_isolated_mask)
-#endif
-
 extern atomic_t __num_online_cpus;
+extern const struct cpumask *const cpu_lp_mask;
+extern const struct cpumask *const cpu_perf_mask;
+extern const struct cpumask *const cpu_prime_mask;
 
 #if NR_CPUS > 1
 /**
@@ -133,22 +136,6 @@ static inline unsigned int num_online_cpus(void)
 #define cpu_possible(cpu)	((cpu) == 0)
 #define cpu_present(cpu)	((cpu) == 0)
 #define cpu_active(cpu)		((cpu) == 0)
-#endif
-
-#if defined(CONFIG_SCHED_WALT) && NR_CPUS > 1
-#define num_isolated_cpus()	cpumask_weight(cpu_isolated_mask)
-#define num_online_uniso_cpus()						\
-({									\
-	cpumask_t mask;							\
-									\
-	cpumask_andnot(&mask, cpu_online_mask, cpu_isolated_mask);	\
-	cpumask_weight(&mask);						\
-})
-#define cpu_isolated(cpu)	cpumask_test_cpu((cpu), cpu_isolated_mask)
-#else /* !CONFIG_SCHED_WALT || NR_CPUS == 1 */
-#define num_isolated_cpus()	0U
-#define num_online_uniso_cpus()	num_online_cpus()
-#define cpu_isolated(cpu)	0U
 #endif
 
 extern cpumask_t cpus_booted_once_mask;
@@ -225,6 +212,95 @@ static inline unsigned int cpumask_local_spread(unsigned int i, int node)
 #define for_each_cpu_and(cpu, mask1, mask2)	\
 	for ((cpu) = 0; (cpu) < 1; (cpu)++, (void)mask1, (void)mask2)
 #else
+#if NR_CPUS <= BITS_PER_LONG
+static inline unsigned int cpumask_first(const struct cpumask *srcp)
+{
+	unsigned int nr;
+
+	nr = __builtin_ffsl(*cpumask_bits(srcp)) - 1;
+	return nr > nr_cpumask_bits ? nr_cpumask_bits : nr;
+}
+
+static inline unsigned int cpumask_last(const struct cpumask *srcp)
+{
+	unsigned long bits = *cpumask_bits(srcp);
+	unsigned int nr;
+
+	if (unlikely(!bits))
+		return nr_cpumask_bits;
+
+	nr = BITS_PER_LONG - 1 - __builtin_clzl(bits);
+	return nr > nr_cpumask_bits ? nr_cpumask_bits : nr;
+}
+
+static inline unsigned int cpumask_next(int n, const struct cpumask *srcp)
+{
+	unsigned int nr, shift;
+	unsigned long bits;
+
+	/* -1 is a legal arg here. */
+	if (n != -1)
+		cpumask_check(n);
+
+	shift = n + 1;
+	if (unlikely(shift >= nr_cpumask_bits))
+		return nr_cpumask_bits;
+
+	bits = *cpumask_bits(srcp);
+	nr = __builtin_ffsl((bits >> shift) << shift) - 1;
+	return nr > nr_cpumask_bits ? nr_cpumask_bits : nr;
+}
+
+static inline unsigned int cpumask_next_zero(int n, const struct cpumask *srcp)
+{
+	unsigned int nr, shift;
+	unsigned long bits;
+
+	/* -1 is a legal arg here. */
+	if (n != -1)
+		cpumask_check(n);
+
+	shift = n + 1;
+	if (unlikely(shift >= nr_cpumask_bits))
+		return nr_cpumask_bits;
+
+	bits = ~*cpumask_bits(srcp);
+	nr = __builtin_ffsl((bits >> shift) << shift) - 1;
+	return nr > nr_cpumask_bits ? nr_cpumask_bits : nr;
+}
+
+static inline int cpumask_next_and(int n, const struct cpumask *srcp,
+				   const struct cpumask *andp)
+{
+	unsigned int nr, shift;
+	unsigned long bits;
+
+	/* -1 is a legal arg here. */
+	if (n != -1)
+		cpumask_check(n);
+
+	shift = n + 1;
+	if (unlikely(shift >= nr_cpumask_bits))
+		return nr_cpumask_bits;
+
+	bits = *cpumask_bits(srcp) & *cpumask_bits(andp);
+	nr = __builtin_ffsl((bits >> shift) << shift) - 1;
+	return nr > nr_cpumask_bits ? nr_cpumask_bits : nr;
+}
+
+static inline int cpumask_any_but(const struct cpumask *mask, unsigned int cpu)
+{
+	unsigned long bits = *cpumask_bits(mask);
+	unsigned int nr;
+
+	cpumask_check(cpu);
+	if (likely(cpu < nr_cpumask_bits))
+		bits &= ~BIT(cpu);
+
+	nr = __builtin_ffsl(bits) - 1;
+	return nr > nr_cpumask_bits ? nr_cpumask_bits : nr;
+}
+#else /* NR_CPUS > BITS_PER_LONG */
 /**
  * cpumask_first - get the first cpu in a cpumask
  * @srcp: the cpumask pointer
@@ -266,6 +342,8 @@ static inline unsigned int cpumask_next_zero(int n, const struct cpumask *srcp)
 
 int cpumask_next_and(int n, const struct cpumask *, const struct cpumask *);
 int cpumask_any_but(const struct cpumask *mask, unsigned int cpu);
+#endif /* NR_CPUS <= BITS_PER_LONG */
+
 unsigned int cpumask_local_spread(unsigned int i, int node);
 
 /**
@@ -416,7 +494,12 @@ static inline int cpumask_test_and_clear_cpu(int cpu, struct cpumask *cpumask)
  */
 static inline void cpumask_setall(struct cpumask *dstp)
 {
+	/* bitmap_fill() isn't optimized for compile-time constants */
+#if NR_CPUS <= BITS_PER_LONG
+	*cpumask_bits(dstp) = BIT(NR_CPUS) - 1;
+#else
 	bitmap_fill(cpumask_bits(dstp), nr_cpumask_bits);
+#endif
 }
 
 /**
@@ -425,7 +508,12 @@ static inline void cpumask_setall(struct cpumask *dstp)
  */
 static inline void cpumask_clear(struct cpumask *dstp)
 {
+	/* bitmap_zero() isn't optimized for compile-time constants */
+#if NR_CPUS <= BITS_PER_LONG
+	*cpumask_bits(dstp) = 0;
+#else
 	bitmap_zero(cpumask_bits(dstp), nr_cpumask_bits);
+#endif
 }
 
 /**
@@ -612,7 +700,12 @@ static inline void cpumask_shift_left(struct cpumask *dstp,
 static inline void cpumask_copy(struct cpumask *dstp,
 				const struct cpumask *srcp)
 {
+	/* bitmap_copy() isn't optimized for compile-time constants */
+#if NR_CPUS <= BITS_PER_LONG
+	*cpumask_bits(dstp) = *cpumask_bits(srcp);
+#else
 	bitmap_copy(cpumask_bits(dstp), cpumask_bits(srcp), nr_cpumask_bits);
+#endif
 }
 
 /**
@@ -828,9 +921,6 @@ extern const DECLARE_BITMAP(cpu_all_bits, NR_CPUS);
 #define for_each_possible_cpu(cpu) for_each_cpu((cpu), cpu_possible_mask)
 #define for_each_online_cpu(cpu)   for_each_cpu((cpu), cpu_online_mask)
 #define for_each_present_cpu(cpu)  for_each_cpu((cpu), cpu_present_mask)
-#ifdef CONFIG_SCHED_WALT
-#define for_each_isolated_cpu(cpu) for_each_cpu((cpu), cpu_isolated_mask)
-#endif
 
 /* Wrappers for arch boot code to manipulate normally-constant masks */
 void init_cpu_present(const struct cpumask *src);
@@ -870,17 +960,6 @@ set_cpu_active(unsigned int cpu, bool active)
 	else
 		cpumask_clear_cpu(cpu, &__cpu_active_mask);
 }
-
-#ifdef CONFIG_SCHED_WALT
-static inline void
-set_cpu_isolated(unsigned int cpu, bool isolated)
-{
-	if (isolated)
-		cpumask_set_cpu(cpu, &__cpu_isolated_mask);
-	else
-		cpumask_clear_cpu(cpu, &__cpu_isolated_mask);
-}
-#endif
 
 
 /**

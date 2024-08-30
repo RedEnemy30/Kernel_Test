@@ -27,17 +27,6 @@
 #include <linux/proc_fs.h>
 #include <linux/of_irq.h>
 #include <linux/uaccess.h>
-#if defined(CONFIG_DRM)
-#include <drm/drm_panel.h>
-#include <drm/drm_notifier.h>
-#include <linux/notifier.h>
-#include <linux/fb.h>
-#elif defined(CONFIG_FB)
-#include <linux/notifier.h>
-#include <linux/fb.h>
-#elif defined(CONFIG_HAS_EARLYSUSPEND)
-#include <linux/earlysuspend.h>
-#endif
 
 #include "goodix_ts_core.h"
 
@@ -1193,9 +1182,6 @@ static irqreturn_t goodix_ts_threadirq_func(int irq, void *data)
 	u8 irq_flag = 0;
 	int r;
 
-	/* prevent CPU from entering deep sleep */
-	pm_qos_update_request(&core_data->pm_qos_req, 100);
-
 	core_data->irq_trig_cnt++;
 	/* inform external module */
 	mutex_lock(&goodix_modules.mutex);
@@ -1206,8 +1192,6 @@ static irqreturn_t goodix_ts_threadirq_func(int irq, void *data)
 		r = ext_module->funcs->irq_event(core_data, ext_module);
 		if (r == EVT_CANCEL_IRQEVT) {
 			mutex_unlock(&goodix_modules.mutex);
-			pm_qos_update_request(&core_data->pm_qos_req,
-					      PM_QOS_DEFAULT_VALUE);
 			return IRQ_HANDLED;
 		}
 	}
@@ -1231,8 +1215,6 @@ static irqreturn_t goodix_ts_threadirq_func(int irq, void *data)
 	/* clean irq flag */
 	irq_flag = 0;
 	ts_dev->hw_ops->write_trans(ts_dev, ts_dev->reg.coor, &irq_flag, 1);
-
-	pm_qos_update_request(&core_data->pm_qos_req, PM_QOS_DEFAULT_VALUE);
 
 	return IRQ_HANDLED;
 }
@@ -2002,73 +1984,33 @@ static void goodix_ts_suspend_work(struct work_struct *work)
 	goodix_ts_suspend(core_data);
 }
 
-/**
- * goodix_ts_fb_notifier_callback - Framebuffer notifier callback
- * Called by kernel during framebuffer blanck/unblank phrase
- */
-int goodix_ts_fb_notifier_callback(struct notifier_block *self,
-	unsigned long event, void *data)
+static int drm_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
 {
-	struct goodix_ts_core *core_data =
-		container_of(self, struct goodix_ts_core, fb_notifier);
-	struct drm_notify_data *fb_event = data;
-	int blank;
-
-	if (fb_event && fb_event->data && core_data) {
-		blank = *(int *)(fb_event->data);
-		flush_workqueue(core_data->ts_workqueue);
-		if (event == DRM_EVENT_BLANK && blank == DRM_BLANK_UNBLANK) {
-			ts_info("notifier tp event:%d, code:%d.", event, blank);
-			ts_info("touchpanel resume");
-			queue_work(core_data->ts_workqueue, &core_data->resume_work);
-		} else if (event == DRM_EVENT_BLANK && (blank == DRM_BLANK_POWERDOWN ||
-			blank == DRM_BLANK_LP1 || blank == DRM_BLANK_LP2)) {
-			ts_info("notifier tp event:%d, code:%d.", event, blank);
-			ts_info("touchpanel suspend by %s", blank == DRM_BLANK_POWERDOWN ? "blank" : "doze");
-			queue_work(core_data->ts_workqueue, &core_data->suspend_work);
-		}
-	}
-
-	return 0;
-}
-
-/*static int drm_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
-{
-	int *blank = NULL;
-	struct drm_panel_notifier *evdata = data;
 	struct goodix_ts_core *core_data = container_of(self, struct goodix_ts_core, drm_notifier);
+	struct drm_panel_notifier *evdata = data;
+	int *blank = evdata->data;
 
-	if (!(event == DRM_PANEL_EARLY_EVENT_BLANK || event == DRM_PANEL_EVENT_BLANK)) {
-		return 0;
-	}
-	blank = evdata->data;
 	switch (*blank) {
 	case DRM_PANEL_BLANK_UNBLANK:
-		if (DRM_PANEL_EARLY_EVENT_BLANK == event) {
-			ts_info("resume: event = %lu, blank = %d, not care\n", event, *blank);
-		} else if (DRM_PANEL_EVENT_BLANK == event) {
-			ts_info("resume: event = %lu, blank = %d\n", event, *blank);
+		ts_debug("resume: event = %lu, blank = %d", event, *blank);
+		if (DRM_PANEL_EVENT_BLANK == event)
 			queue_work(core_data->ts_workqueue, &core_data->resume_work);
-		}
 		break;
-
 	case DRM_PANEL_BLANK_POWERDOWN:
+	case DRM_PANEL_BLANK_LP:
+		ts_debug("suspend: event = %lu, blank = %d", event, *blank);
 		if (DRM_PANEL_EARLY_EVENT_BLANK == event) {
-			ts_info("suspend: event = %lu, blank = %d\n", event, *blank);
 			cancel_work_sync(&core_data->resume_work);
-			goodix_ts_suspend(core_data);
-		} else if (DRM_PANEL_EVENT_BLANK == event) {
-			ts_info("suspend: event = %lu, blank = %d, not care\n", event, *blank);
+			queue_work(core_data->ts_workqueue, &core_data->suspend_work);
 		}
 		break;
 
 	default:
-//		ts_info("DRM BLANK(%d) do not need process\n", *blank);
+		ts_debug("DRM BLANK(%d) do not need process", *blank);
 		break;
 	}
 	return 0;
 }
-#endif*/
 
 #elif defined(CONFIG_FB)
 static void goodix_ts_resume_work(struct work_struct *work)
@@ -2229,6 +2171,7 @@ int goodix_ts_stage2_init(struct goodix_ts_core *core_data)
 {
 	int r;// ret;
 	struct goodix_ts_device *ts_dev = ts_device(core_data);
+	struct drm_panel *active_panel = goodix_get_panel();
 
 	/* send normal-cfg to firmware */
 	r = ts_dev->hw_ops->send_config(ts_dev, &(ts_dev->normal_cfg));
@@ -2257,8 +2200,6 @@ int goodix_ts_stage2_init(struct goodix_ts_core *core_data)
 			goto err_finger;
 		}
 	}
-	pm_qos_add_request(&core_data->pm_qos_req, PM_QOS_CPU_DMA_LATENCY,
-			   PM_QOS_DEFAULT_VALUE);
 	/* request irq line */
 	r = goodix_ts_irq_setup(core_data);
 	if (r < 0) {
@@ -2268,18 +2209,17 @@ int goodix_ts_stage2_init(struct goodix_ts_core *core_data)
 	ts_info("success register irq");
 
 #if defined(CONFIG_DRM)
-#if defined(CONFIG_WT_QGKI)
-	core_data->fb_notifier.notifier_call = goodix_ts_fb_notifier_callback;
-	if (drm_register_client(&core_data->fb_notifier)) {
-		ts_err("Failed to register fb notifier client:%d", r);
-	} else {
-		ts_info("success register fb notifier client");
-	}
-#endif
+	core_data->drm_notifier.notifier_call = drm_notifier_callback;
+	if (active_panel)
+		r = drm_panel_notifier_register(active_panel, &core_data->drm_notifier);
+	else
+		r = -ENODEV;
+	if (r)
+		ts_err("Failed to register drm panel notifier:%d", r);
 #elif defined(CONFIG_FB)
 	core_data->fb_notifier.notifier_call = goodix_ts_fb_notifier_callback;
-	ret = fb_register_client(&core_data->fb_notifier);
-	if (ret)
+	r = fb_register_client(&core_data->fb_notifier);
+	if (r)
 		ts_err("Failed to register fb notifier client:%d", r);
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 	core_data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
@@ -2300,7 +2240,6 @@ int goodix_ts_stage2_init(struct goodix_ts_core *core_data)
 
 	return 0;
 exit:
-	pm_qos_remove_request(&core_data->pm_qos_req);
 	goodix_ts_pen_dev_remove(core_data);
 err_finger:
 	goodix_ts_input_dev_remove(core_data);
@@ -2491,6 +2430,7 @@ static int goodix_ts_remove(struct platform_device *pdev)
 {
 	struct goodix_ts_core *core_data = platform_get_drvdata(pdev);
 	struct goodix_ts_esd *ts_esd = &core_data->ts_esd;
+	struct drm_panel *active_panel = goodix_get_panel();
 
 	if (goodix_unregister_all_module())
 		return -EBUSY;
@@ -2506,14 +2446,13 @@ static int goodix_ts_remove(struct platform_device *pdev)
 #endif
 	if (core_data->ts_workqueue)
 		destroy_workqueue(core_data->ts_workqueue);
-#ifdef CONFIG_WT_QGKI
 #if defined(CONFIG_DRM)
-	drm_unregister_client(&core_data->fb_notifier);
+	if (active_panel)
+		drm_panel_notifier_unregister(active_panel, &core_data->drm_notifier);
 #elif defined(CONFIG_FB)
 	fb_unregister_client(&core_data->fb_notifier);
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 	unregister_early_suspend(&core_data->early_suspend);
-#endif
 #endif
 	core_data->initialized = 0;
 	core_module_prob_sate = CORE_MODULE_REMOVED;
@@ -2524,7 +2463,6 @@ static int goodix_ts_remove(struct platform_device *pdev)
 	goodix_ts_input_dev_remove(core_data);
 	goodix_ts_pen_dev_remove(core_data);
 	goodix_ts_irq_enable(core_data, false);
-	pm_qos_remove_request(&core_data->pm_qos_req);
 
 	goodix_ts_power_off(core_data);
 	goodix_ts_sysfs_exit(core_data);

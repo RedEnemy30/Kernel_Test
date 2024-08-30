@@ -196,7 +196,7 @@ static bool find_min_bd(const cpumask_t *mask, unsigned int max_intrs,
 	return max_intrs - min_intrs < IRQ_SCALED_THRESH;
 }
 
-static void balance_irqs(void)
+extern void balance_irqs(void)
 {
 	static cpumask_t cpus;
 	struct bal_domain *bd, *max_bd, *min_bd;
@@ -220,8 +220,11 @@ static void balance_irqs(void)
 	 * interrupts. That way, time spent processing each interrupt is
 	 * considered when balancing.
 	 */
-	for_each_cpu(cpu, &cpus)
-		per_cpu(cpu_cap, cpu) = cpu_rq(cpu)->cpu_capacity;
+	for_each_cpu(cpu, &cpus) {
+		struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
+		per_cpu(cpu_cap, cpu) = arch_scale_cpu_capacity(cpu) *
+					policy->min / policy->max;
+	}
 
 	list_for_each_entry_rcu(bi, &bal_irq_list, node) {
 		if (!update_irq_data(bi, &cpu))
